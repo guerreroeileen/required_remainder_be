@@ -1,4 +1,4 @@
-name: Build and Deploy Spring Boot (Gradle) to ECS with CloudFormation
+name: Build and Deploy Spring Boot to ECS
 
 on:
   push:
@@ -10,8 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      ECR_REPOSITORY: required-remainder-be
-      IMAGE_TAG: latest
+      ECR_REPOSITORY: required-remainder-backend
+      IMAGE_TAG: ${GITHUB_SHA::7}
+      CLUSTER_NAME: required-remainder-cluster
 
     steps:
       - name: Checkout code
@@ -51,11 +52,64 @@ jobs:
         run: |
           docker push $ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
 
-      - name: Deploy to CloudFormation
+      - name: Update ECS service
         run: |
-          aws cloudformation deploy \
-            --template-file ../required_remainder_infra/cloudformation/backend.yaml \
+          # Check if the service exists
+          SERVICE_EXISTS=$(aws ecs list-services --cluster ${{ env.CLUSTER_NAME }} --query 'serviceArns[?contains(@, `required-remainder`)]' --output text)
+          
+          if [ -z "$SERVICE_EXISTS" ]; then
+            echo "ECS service does not exist yet. Please deploy the infrastructure first with DeployService=true"
+            exit 1
+          fi
+          
+          # Get the service name (remove the ARN prefix)
+          SERVICE_NAME=$(echo $SERVICE_EXISTS | sed 's/.*\///')
+          echo "Found ECS service: $SERVICE_NAME"
+          
+          # Update the task definition with new image
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster ${{ env.CLUSTER_NAME }} \
+            --services $SERVICE_NAME \
+            --query 'services[0].taskDefinition' \
+            --output text)
+          
+          # Get current task definition
+          aws ecs describe-task-definition --task-definition $TASK_DEF_ARN > task-def.json
+          
+          # Update image in task definition
+          jq --arg IMAGE "$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}" \
+             '.taskDefinition | .containerDefinitions[0].image = $IMAGE | {containerDefinitions: .containerDefinitions, family: .family, taskRoleArn: .taskRoleArn, executionRoleArn: .executionRoleArn, networkMode: .networkMode, volumes: .volumes, placementConstraints: .placementConstraints, requiresCompatibilities: .requiresCompatibilities, cpu: .cpu, memory: .memory, tags: .tags, pidMode: .pidMode, ipcMode: .ipcMode, proxyConfiguration: .proxyConfiguration, inferenceAccelerators: .inferenceAccelerators}' > new-task-def.json
+          
+          # Register new task definition
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition --cli-input-json file://new-task-def.json --query 'taskDefinition.taskDefinitionArn' --output text)
+          
+          # Update service with new task definition
+          aws ecs update-service \
+            --cluster ${{ env.CLUSTER_NAME }} \
+            --service $SERVICE_NAME \
+            --task-definition $NEW_TASK_DEF_ARN
+
+      - name: Wait for deployment
+        run: |
+          # Get the service name again
+          SERVICE_EXISTS=$(aws ecs list-services --cluster ${{ env.CLUSTER_NAME }} --query 'serviceArns[?contains(@, `required-remainder`)]' --output text)
+          SERVICE_NAME=$(echo $SERVICE_EXISTS | sed 's/.*\///')
+          
+          aws ecs wait services-stable \
+            --cluster ${{ env.CLUSTER_NAME }} \
+            --services $SERVICE_NAME
+
+      - name: Get deployment info
+        run: |
+          echo "Backend deployed successfully!"
+          
+          # Get the ALB URL from CloudFormation stack
+          ALB_URL=$(aws cloudformation describe-stacks \
             --stack-name required-remainder-backend \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides \
-              ContainerImage=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+            --query 'Stacks[0].Outputs[?OutputKey==`LoadBalancerURL`].OutputValue' \
+            --output text)
+          
+          echo ""
+          echo "Backend URL: $ALB_URL"
+          echo "Health Check: $ALB_URL/actuator/health"
+          echo "API Endpoint: $ALB_URL/required-remainder"
