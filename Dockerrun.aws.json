@@ -1,0 +1,14 @@
+{
+  "AWSEBDockerrunVersion": "1",
+  "Image": {
+    "Name": "placeholder-image",
+    "Update": "true"
+  },
+  "Ports": [
+    {
+      "ContainerPort": 8080,
+      "HostPort": 80
+    }
+  ],
+  "Volumes": []
+} 

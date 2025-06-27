@@ -1,4 +1,4 @@
-name: Build and Deploy Spring Boot (Gradle) to ECS with CloudFormation
+name: Build and Deploy Spring Boot to Elastic Beanstalk
 
 on:
   push:
@@ -10,8 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      ECR_REPOSITORY: required-remainder-be
-      IMAGE_TAG: latest
+      ECR_REPOSITORY: required-remainder-backend
+      IMAGE_TAG: ${GITHUB_SHA::7}
+      EB_APPLICATION_NAME: required-remainder-backend
+      EB_ENVIRONMENT_NAME: required-remainder-backend-env
 
     steps:
       - name: Checkout code
@@ -51,11 +53,108 @@ jobs:
         run: |
           docker push $ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
 
-      - name: Deploy to CloudFormation
+      - name: Install EB CLI
         run: |
-          aws cloudformation deploy \
-            --template-file ../required_remainder_infra/cloudformation/backend.yaml \
-            --stack-name required-remainder-backend \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --parameter-overrides \
-              ContainerImage=$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+          pip install awsebcli
+
+      - name: Create Dockerrun.aws.json
+        run: |
+          cat > Dockerrun.aws.json << EOF
+          {
+            "AWSEBDockerrunVersion": "1",
+            "Image": {
+              "Name": "$ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}",
+              "Update": "true"
+            },
+            "Ports": [
+              {
+                "ContainerPort": 8080,
+                "HostPort": 80
+              }
+            ]
+          }
+          EOF
+
+      - name: Create and upload application bundle
+        run: |
+          # Create a zip file with the Dockerrun.aws.json
+          zip -r application-${{ env.IMAGE_TAG }}.zip Dockerrun.aws.json
+          
+          # Upload to S3 first
+          aws s3 cp application-${{ env.IMAGE_TAG }}.zip s3://elasticbeanstalk-us-east-1-$ACCOUNT_ID/required-remainder-backend/
+          
+          # Create application version in Elastic Beanstalk
+          aws elasticbeanstalk create-application-version \
+            --application-name ${{ env.EB_APPLICATION_NAME }} \
+            --version-label v-${{ env.IMAGE_TAG }} \
+            --source-bundle S3Bucket="elasticbeanstalk-us-east-1-$ACCOUNT_ID",S3Key="required-remainder-backend/application-${{ env.IMAGE_TAG }}.zip" \
+            --auto-create-application
+
+      - name: Delete previous application version (if exists)
+        run: |
+          aws elasticbeanstalk delete-application-version \
+            --application-name ${{ env.EB_APPLICATION_NAME }} \
+            --version-label v-${{ env.IMAGE_TAG }} \
+            --delete-source-bundle || true
+
+      - name: Deploy to Elastic Beanstalk
+        run: |
+          # Check if environment exists
+          ENV_EXISTS=$(aws elasticbeanstalk describe-environments \
+            --application-name ${{ env.EB_APPLICATION_NAME }} \
+            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+            --query 'Environments[0].Status' \
+            --output text)
+          
+          if [ "$ENV_EXISTS" = "None" ] || [ "$ENV_EXISTS" = "null" ]; then
+            echo "Creating Elastic Beanstalk environment..."
+            
+            # Create environment with minimal configuration
+            aws elasticbeanstalk create-environment \
+              --application-name ${{ env.EB_APPLICATION_NAME }} \
+              --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
+              --solution-stack-name "64bit Amazon Linux 2 v4.2.0 running Docker" \
+              --version-label v-${{ env.IMAGE_TAG }} \
+              --option-settings \
+                Namespace=aws:autoscaling:launchconfiguration,OptionName=IamInstanceProfile,Value=aws-elasticbeanstalk-ec2-role \
+                Namespace=aws:autoscaling:launchconfiguration,OptionName=InstanceType,Value=t3.small \
+                Namespace=aws:autoscaling:asg,OptionName=MinSize,Value=1 \
+                Namespace=aws:autoscaling:asg,OptionName=MaxSize,Value=2 \
+                Namespace=aws:elasticbeanstalk:environment,OptionName=EnvironmentType,Value=LoadBalanced \
+                Namespace=aws:elasticbeanstalk:application:environment,OptionName=SPRING_PROFILES_ACTIVE,Value=dev
+            
+            echo "Environment creation started. Waiting for it to be ready..."
+            aws elasticbeanstalk wait environment-exists \
+              --environment-names ${{ env.EB_ENVIRONMENT_NAME }}
+          else
+            echo "Environment exists. Updating with new version..."
+            # Update environment with new version
+            aws elasticbeanstalk update-environment \
+              --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
+              --version-label v-${{ env.IMAGE_TAG }}
+          fi
+
+      - name: Wait for deployment
+        run: |
+          # Wait for environment to be ready
+          aws elasticbeanstalk wait environment-updated \
+            --environment-names ${{ env.EB_ENVIRONMENT_NAME }}
+          
+          # Additional wait to ensure environment is fully ready
+          sleep 30
+
+      - name: Get deployment info
+        run: |
+          echo "Backend deployed successfully!"
+          
+          # Get the environment URL
+          ENV_URL=$(aws elasticbeanstalk describe-environments \
+            --application-name ${{ env.EB_APPLICATION_NAME }} \
+            --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
+            --query 'Environments[0].CNAME' \
+            --output text)
+          
+          echo ""
+          echo "Backend URL: http://$ENV_URL"
+          echo "Health Check: http://$ENV_URL/actuator/health"
+          echo "API Endpoint: http://$ENV_URL/required-remainder"
