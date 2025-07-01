@@ -11,16 +11,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static com.example.required_remainder_be.constants.GeneralConstants.N_MUST_BE_BETWEEN_Y_AND_10_9;
+import static com.example.required_remainder_be.constants.GeneralConstants.ONE_BILLION;
+import static com.example.required_remainder_be.constants.GeneralConstants.TWO;
 import static com.example.required_remainder_be.constants.GeneralConstants.X_MUST_BE_BETWEEN_2_AND_10_9;
 import static com.example.required_remainder_be.constants.GeneralConstants.Y_MUST_BE_BETWEEN_0_AND_X_1;
+import static org.apache.tomcat.util.json.JSONParserConstants.ZERO;
 
 @Service
 @Slf4j
 public class RequiredRemainderService {
-
-    private static final int ONE_BILLION = 1_000_000_000;
-    private static final int ZERO = 0;
-    private static final int TWO = 2;
 
     /**
      * Solves test cases and returns List<Long> with results

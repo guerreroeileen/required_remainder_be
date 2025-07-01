@@ -77,25 +77,47 @@ jobs:
 
       - name: Create and upload application bundle
         run: |
-          # Create a zip file with the Dockerrun.aws.json
+          set -e
+          echo "IMAGE_TAG: ${{ env.IMAGE_TAG }}"
+          echo "ACCOUNT_ID: $ACCOUNT_ID"
+          echo "Archivos en el workspace antes de crear el zip:"
+          ls -lh
+          echo "Creando zip: application-${{ env.IMAGE_TAG }}.zip"
           zip -r application-${{ env.IMAGE_TAG }}.zip Dockerrun.aws.json
-          
-          # Upload to S3 first
+          echo "Archivos en el workspace después de crear el zip:"
+          ls -lh
+          echo "Subiendo a S3: application-${{ env.IMAGE_TAG }}.zip"
           aws s3 cp application-${{ env.IMAGE_TAG }}.zip s3://elasticbeanstalk-us-east-1-$ACCOUNT_ID/required-remainder-backend/
-          
-          # Create application version in Elastic Beanstalk
+          echo "Listando archivos en S3 después de la subida:"
+          aws s3 ls s3://elasticbeanstalk-us-east-1-$ACCOUNT_ID/required-remainder-backend/
+          echo "Creando Application Version en Elastic Beanstalk..."
           aws elasticbeanstalk create-application-version \
             --application-name ${{ env.EB_APPLICATION_NAME }} \
             --version-label v-${{ env.IMAGE_TAG }} \
             --source-bundle S3Bucket="elasticbeanstalk-us-east-1-$ACCOUNT_ID",S3Key="required-remainder-backend/application-${{ env.IMAGE_TAG }}.zip" \
             --auto-create-application
-
-      - name: Delete previous application version (if exists)
-        run: |
-          aws elasticbeanstalk delete-application-version \
+          echo "Verificando Application Version creada:"
+          aws elasticbeanstalk describe-application-versions \
             --application-name ${{ env.EB_APPLICATION_NAME }} \
-            --version-label v-${{ env.IMAGE_TAG }} \
-            --delete-source-bundle || true
+            --version-label v-${{ env.IMAGE_TAG }}
+
+      - name: Wait for application version to be processed
+        run: |
+          echo "Esperando a que la Application Version esté PROCESSED..."
+          for i in {1..12}; do
+            STATUS=$(aws elasticbeanstalk describe-application-versions \
+              --application-name ${{ env.EB_APPLICATION_NAME }} \
+              --version-label v-${{ env.IMAGE_TAG }} \
+              --query 'ApplicationVersions[0].Status' \
+              --output text)
+            echo "Estado actual: $STATUS"
+            if [ "$STATUS" = "PROCESSED" ]; then
+              echo "Application Version está PROCESSED."
+              break
+            fi
+            echo "Esperando 5 segundos..."
+            sleep 5
+          done
 
       - name: Deploy to Elastic Beanstalk
         run: |

@@ -8,4 +8,9 @@ public final class GeneralConstants {
     //controller constants
     public static final String API_REQUIRED_REMAINDER_PATH = "/api/required-remainder";
     public static final String SOLVE_PATH = "/solve";
+
+
+    public static final int ONE_BILLION = 1_000_000_000;
+    public static final int ZERO = 0;
+    public static final int TWO = 2;
 }
