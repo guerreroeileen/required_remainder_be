@@ -30,6 +30,9 @@ jobs:
       - name: Build JAR with Gradle
         run: ./gradlew bootJar
 
+      - name: Run tests
+        run: ./gradlew test
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -79,42 +82,42 @@ jobs:
           set -e
           echo "IMAGE_TAG: ${{ env.IMAGE_TAG }}"
           echo "ACCOUNT_ID: $ACCOUNT_ID"
-          echo "Archivos en el workspace antes de crear el zip:"
+          echo "Files in workspace before creating the zip:"
           ls -lh
-          echo "Creando zip: application-${{ env.IMAGE_TAG }}.zip"
+          echo "Creating zip: application-${{ env.IMAGE_TAG }}.zip"
           zip -r application-${{ env.IMAGE_TAG }}.zip Dockerrun.aws.json
-          echo "Archivos en el workspace después de crear el zip:"
+          echo "Files in workspace after creating the zip:"
           ls -lh
-          echo "Subiendo a S3: application-${{ env.IMAGE_TAG }}.zip"
+          echo "Uploading to S3: application-${{ env.IMAGE_TAG }}.zip"
           aws s3 cp application-${{ env.IMAGE_TAG }}.zip s3://$S3_BUCKET/required-remainder-backend/
-          echo "Listando archivos en S3 después de la subida:"
+          echo "Listing files in S3 after upload:"
           aws s3 ls s3://$S3_BUCKET/required-remainder-backend/
-          echo "Creando Application Version en Elastic Beanstalk..."
+          echo "Creating Application Version in Elastic Beanstalk..."
           aws elasticbeanstalk create-application-version \
             --application-name ${{ env.EB_APPLICATION_NAME }} \
             --version-label v-${{ env.IMAGE_TAG }} \
             --source-bundle S3Bucket=$S3_BUCKET,S3Key="required-remainder-backend/application-${{ env.IMAGE_TAG }}.zip" \
             --auto-create-application
-          echo "Verificando Application Version creada:"
+          echo "Verifying Application Version created:"
           aws elasticbeanstalk describe-application-versions \
             --application-name ${{ env.EB_APPLICATION_NAME }} \
             --version-label v-${{ env.IMAGE_TAG }}
 
       - name: Wait for application version to be processed
         run: |
-          echo "Esperando a que la Application Version esté PROCESSED..."
+          echo "Waiting for Application Version to be PROCESSED..."
           for i in {1..12}; do
             STATUS=$(aws elasticbeanstalk describe-application-versions \
               --application-name ${{ env.EB_APPLICATION_NAME }} \
               --version-label v-${{ env.IMAGE_TAG }} \
               --query 'ApplicationVersions[0].Status' \
               --output text)
-            echo "Estado actual: $STATUS"
+            echo "Current status: $STATUS"
             if [ "$STATUS" = "PROCESSED" ]; then
-              echo "Application Version está PROCESSED."
+              echo "Application Version is PROCESSED."
               break
             fi
-            echo "Esperando 5 segundos..."
+            echo "Waiting 5 seconds..."
             sleep 5
           done
 

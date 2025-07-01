@@ -17,13 +17,13 @@ if [ $? -eq 0 ]; then
     docker build -t required-remainder-backend .
     
     if [ $? -eq 0 ]; then
-        echo "✅ Docker build successful"
-        echo "🎯 Next steps:"
-        echo "1. Tag the image: docker tag required-remainder-backend:latest <ECR_URI>:<TAG>"
-        echo "2. Push to ECR: docker push <ECR_URI>:<TAG>"
+        echo "Docker build successful"
+        echo "Next steps:"
+        echo "Tag the image: docker tag required-remainder-backend:latest <ECR_URI>:<TAG>"
+        echo "Push to ECR: docker push <ECR_URI>:<TAG>"
         echo "3. Update CloudFormation stack with DeployService=true"
     else
-        echo "❌ Docker build failed"
+        echo "Docker build failed"
         exit 1
     fi
 else

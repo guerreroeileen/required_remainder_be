@@ -15,7 +15,7 @@ import static com.example.required_remainder_be.constants.GeneralConstants.ONE_B
 import static com.example.required_remainder_be.constants.GeneralConstants.TWO;
 import static com.example.required_remainder_be.constants.GeneralConstants.X_MUST_BE_BETWEEN_2_AND_10_9;
 import static com.example.required_remainder_be.constants.GeneralConstants.Y_MUST_BE_BETWEEN_0_AND_X_1;
-import static org.apache.tomcat.util.json.JSONParserConstants.ZERO;
+import static com.example.required_remainder_be.constants.GeneralConstants.ZERO;
 
 @Service
 @Slf4j
@@ -74,7 +74,7 @@ public class RequiredRemainderService {
         
         long maxQuotient = (n - y) / x;
         long result = maxQuotient * x + y;
-        
+
         if (result > n || result < ZERO) {
             throw new RequiredRemainderException(
                 "No valid solution found for the given constraints",

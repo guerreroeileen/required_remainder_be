@@ -11,7 +11,7 @@ import lombok.Setter;
 public class RequiredRemainderRequest {
     
     @NotNull(message = "x cannot be null")
-    @Min(value = 2, message = "x must be at least 2")
+    @Min(value = 0, message = "x must be at least 2")
     @Max(value = 1000000000, message = "x cannot exceed 1,000,000,000")
     private Long x;
     

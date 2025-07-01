@@ -9,31 +9,32 @@ A Spring Boot application that solves the "Required Remainder" algorithmic probl
 - **Exception Handling**: Error handling with trace IDs
 - **High Performance**: Optimized algorithm for large numbers (up to 10^9)
 - **Comprehensive Testing**: Unit and integration tests with >80% coverage
-- **AWS Integration**: CloudFormation templates for infrastructure deployment
-- **GitHub Actions**: Actions for deploy changes into the previously deployed infrastructure
+- **AWS Integration**: Elastic Beanstalk deployment with Docker
+- **GitHub Actions**: Automated CI/CD pipeline with test validation
 
 ## 🏗️ Architecture
 
 ### Backend (Spring Boot)
 - **Framework**: Spring Boot 3.5.3
-- **Language**: Java 24
+- **Language**: Java 17
 - **Build Tool**: Gradle
 - **Validation**: Bean Validation (Jakarta)
 - **Testing**: JUnit 5 + Mockito
+- **Containerization**: Docker with multi-stage builds
 
 ### Infrastructure (AWS)
-- **Compute**: ECS Fargate
+- **Compute**: Elastic Beanstalk with Docker
 - **Container Registry**: ECR
-- **Load Balancer**: Application Load Balancer
+- **Load Balancer**: Application Load Balancer (managed by EB)
 - **Networking**: VPC with public subnets
 - **Logging**: CloudWatch Logs
 
 ## 📋 Prerequisites
 
 ### Local Development
-- Java 24 or higher
+- Java 17 or higher
 - Gradle 8.x
-- Docker (optional)
+- Docker (optional, for containerized builds)
 
 ### AWS Deployment
 - AWS CLI configured
@@ -49,13 +50,23 @@ A Spring Boot application that solves the "Required Remainder" algorithmic probl
    ./gradlew build
    ```
 
-2. **Run the application**
+2. **Run tests**
+   ```bash
+   ./gradlew test
+   ```
+
+3. **Run the application**
    ```bash
    ./gradlew bootRun
    ```
 
    The application will start on `http://localhost:8080`
 
+4. **Build Docker image (optional)**
+   ```bash
+   ./gradlew build
+   docker build -t required-remainder-backend .
+   ```
 
 ### AWS Deployment
 
@@ -64,13 +75,10 @@ The backend is automatically deployed via GitHub Actions when you push to the ma
 1. Build and test the application
 2. Build Docker image
 3. Push to ECR
-4. Create/update ECS service
+4. Deploy to Elastic Beanstalk
 
 ## 📚 API Documentation
 
-### Base URL
-- **Local**: `http://localhost:8080`
-- **AWS**: `http://<load-balancer-dns>`
 
 ### Endpoints
 
@@ -119,6 +127,28 @@ curl -X POST http://localhost:8080/api/required-remainder/solve \
   ]'
 ```
 
+#### Multiple Test Cases
+```bash
+curl -X POST http://localhost:8080/api/required-remainder/solve \
+  -H "Content-Type: application/json" \
+  -d '[
+    {
+      "x": 7,
+      "y": 5,
+      "n": 12345
+    },
+    {
+      "x": 5,
+      "y": 0,
+      "n": 4
+    },
+    {
+      "x": 10,
+      "y": 5,
+      "n": 15
+    }
+  ]'
+```
 
 ## 🧪 Testing
 
@@ -126,6 +156,20 @@ curl -X POST http://localhost:8080/api/required-remainder/solve \
 ```bash
 ./gradlew test
 ```
+
+### Run Tests with Coverage
+```bash
+./gradlew test jacocoTestReport
+```
+
+### Test Structure
+- **Unit Tests**: Service layer and business logic
+- **Integration Tests**: Controller endpoints and validation
+- **Coverage**: Aim for >80% code coverage
+
+### Test Files
+- `RequiredRemainderServiceTest.java`: Service layer tests
+- `RequiredRemainderControllerTest.java`: Controller integration tests
 
 ## 🔧 Configuration
 
@@ -162,23 +206,43 @@ management.endpoint.health.show-details=always
 
 ### GitHub Actions Workflow
 
-The backend uses GitHub Actions for CI/CD. The workflow (`/.github/workflows/aws.yml`) will:
+The backend uses GitHub Actions for CI/CD. The workflow (`/.github/workflows/aws.yml`) includes:
 
-1. **Build and Test**: Compile, run tests, and check coverage
-2. **Docker Build**: Create Docker image with the application
-3. **ECR Push**: Push image to Amazon ECR
-4. **ECS Deployment**: Create or update ECS service
+1. **Setup**: Install Java and Gradle
+2. **Test**: Run unit tests and fail if any test fails
+3. **Build**: Compile and package the application
+4. **Docker Build**: Create Docker image with the application
+5. **ECR Push**: Push image to Amazon ECR
+6. **EB Deploy**: Deploy to Elastic Beanstalk environment
 
 ### Required Secrets
 
 Configure these secrets in your GitHub repository:
 
-| Secret | Description        |
-|--------|--------------------|
-| `AWS_ACCESS_KEY_ID` | AWS access key     |
-| `AWS_SECRET_ACCESS_KEY` | AWS secret key     |
-| `ECR_REPOSITORY` | AWS ECR repository |
+| Secret | Description        | Required |
+|--------|--------------------|----------|
+| `AWS_ACCESS_KEY_ID` | AWS access key     | ✅ |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key     | ✅ |
+| `ECR_REPOSITORY` | AWS ECR repository | ✅ |
 
+### Docker Configuration
+
+The application uses a multi-stage Docker build:
+
+```dockerfile
+# Build stage
+FROM gradle:8.5-jdk17 AS build
+WORKDIR /app
+COPY . .
+RUN gradle build --no-daemon
+
+# Runtime stage
+FROM openjdk:17-jre-slim
+WORKDIR /app
+COPY --from=build /app/build/libs/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
 
 ## 🔍 Monitoring
 
@@ -193,4 +257,34 @@ curl http://localhost:8080/actuator/info
 ```
 
 ### CloudWatch Logs
-Logs are automatically sent to CloudWatch with the log group: `/ecs/required-remainder-backend`
+Logs are automatically sent to CloudWatch with the log group: `/aws/elasticbeanstalk/required-remainder-backend-env/var/log/eb-docker/containers/eb-current-app/`
+
+## 🔐 Security
+
+### Input Validation
+- All inputs are validated using Bean Validation
+- Custom validation for business rules
+- Detailed error messages with trace IDs
+
+### Error Handling
+- Global exception handler
+- Proper HTTP status codes
+- Structured error responses
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+1. **Java Version**
+   - Ensure Java 17 is installed and configured
+   - Check JAVA_HOME environment variable
+
+2. **Build Issues**
+   - Clear Gradle cache: `./gradlew clean`
+   - Check for dependency conflicts
+
+3. **Deployment Issues**
+   - Verify AWS credentials and permissions
+   - Check Elastic Beanstalk environment status
+   - Review CloudWatch logs for errors
+
