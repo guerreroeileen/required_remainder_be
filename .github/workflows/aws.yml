@@ -8,13 +8,12 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     env:
       ECR_REPOSITORY: required-remainder-backend
       IMAGE_TAG: ${GITHUB_SHA::7}
       EB_APPLICATION_NAME: required-remainder-backend
       EB_ENVIRONMENT_NAME: required-remainder-backend-env
-
+      S3_BUCKET: required-remainder-fe-bucket
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -22,7 +21,7 @@ jobs:
       - name: Set up JDK
         uses: actions/setup-java@v3
         with:
-          java-version: '24'
+          java-version: '17'
           distribution: 'temurin'
 
       - name: Grant execute permission to Gradle
@@ -87,14 +86,14 @@ jobs:
           echo "Archivos en el workspace después de crear el zip:"
           ls -lh
           echo "Subiendo a S3: application-${{ env.IMAGE_TAG }}.zip"
-          aws s3 cp application-${{ env.IMAGE_TAG }}.zip s3://elasticbeanstalk-us-east-1-$ACCOUNT_ID/required-remainder-backend/
+          aws s3 cp application-${{ env.IMAGE_TAG }}.zip s3://$S3_BUCKET/required-remainder-backend/
           echo "Listando archivos en S3 después de la subida:"
-          aws s3 ls s3://elasticbeanstalk-us-east-1-$ACCOUNT_ID/required-remainder-backend/
+          aws s3 ls s3://$S3_BUCKET/required-remainder-backend/
           echo "Creando Application Version en Elastic Beanstalk..."
           aws elasticbeanstalk create-application-version \
             --application-name ${{ env.EB_APPLICATION_NAME }} \
             --version-label v-${{ env.IMAGE_TAG }} \
-            --source-bundle S3Bucket="elasticbeanstalk-us-east-1-$ACCOUNT_ID",S3Key="required-remainder-backend/application-${{ env.IMAGE_TAG }}.zip" \
+            --source-bundle S3Bucket=$S3_BUCKET,S3Key="required-remainder-backend/application-${{ env.IMAGE_TAG }}.zip" \
             --auto-create-application
           echo "Verificando Application Version creada:"
           aws elasticbeanstalk describe-application-versions \
@@ -121,17 +120,16 @@ jobs:
 
       - name: Deploy to Elastic Beanstalk
         run: |
-          # Check if environment exists
           ENV_EXISTS=$(aws elasticbeanstalk describe-environments \
             --application-name ${{ env.EB_APPLICATION_NAME }} \
             --environment-names ${{ env.EB_ENVIRONMENT_NAME }} \
             --query 'Environments[0].Status' \
             --output text)
-          
-          if [ "$ENV_EXISTS" = "None" ] || [ "$ENV_EXISTS" = "null" ]; then
+
+          echo "ENV_EXISTS: $ENV_EXISTS"
+
+          if [ "$ENV_EXISTS" = "None" ] || [ "$ENV_EXISTS" = "null" ] || [ "$ENV_EXISTS" = "TERMINATED" ] || [ -z "$ENV_EXISTS" ]; then
             echo "Creating Elastic Beanstalk environment..."
-            
-            # Create environment with minimal configuration
             aws elasticbeanstalk create-environment \
               --application-name ${{ env.EB_APPLICATION_NAME }} \
               --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
@@ -144,13 +142,11 @@ jobs:
                 Namespace=aws:autoscaling:asg,OptionName=MaxSize,Value=2 \
                 Namespace=aws:elasticbeanstalk:environment,OptionName=EnvironmentType,Value=LoadBalanced \
                 Namespace=aws:elasticbeanstalk:application:environment,OptionName=SPRING_PROFILES_ACTIVE,Value=dev
-            
             echo "Environment creation started. Waiting for it to be ready..."
             aws elasticbeanstalk wait environment-exists \
               --environment-names ${{ env.EB_ENVIRONMENT_NAME }}
           else
             echo "Environment exists. Updating with new version..."
-            # Update environment with new version
             aws elasticbeanstalk update-environment \
               --environment-name ${{ env.EB_ENVIRONMENT_NAME }} \
               --version-label v-${{ env.IMAGE_TAG }}
